@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Sendgo.AspNetCore</RootNamespace>
+    <AssemblyName>Sendgo.AspNetCore</AssemblyName>
+    <PackageId>Sendgo.AspNetCore</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Sendgo</Authors>
+    <Company>Sendgo</Company>
+    <Description>Sendgo ASP.NET Core DI 확장 — 카카오 알림톡/친구톡, SMS/LMS/MMS를 의존성 주입으로 손쉽게 사용</Description>
+    <PackageProjectUrl>https://sendgo.io</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>sendgo;kakao;alimtalk;sms;aspnetcore;korea</PackageTags>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Sendgo.SDK" Version="1.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+  </ItemGroup>
+</Project>
