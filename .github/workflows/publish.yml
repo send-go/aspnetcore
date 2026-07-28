@@ -1,0 +1,26 @@
+name: Publish to NuGet
+
+# vX.Y.Z 태그 push 또는 수동 실행 시 NuGet 으로 배포합니다.
+# secrets.NUGET_API_KEY (nuget.org API 키) 필요.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0"
+      - name: 패키지 pack
+        run: dotnet pack src -c Release -o out
+      - name: NuGet 배포
+        run: >
+          dotnet nuget push "out/*.nupkg"
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
