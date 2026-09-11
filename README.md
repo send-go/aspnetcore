@@ -323,7 +323,138 @@ A. `SendgoClient`는 `sealed`이므로, 도메인 서비스가 의존하는 인�
 사용 예시와 파라미터는 [코어 README](https://github.com/send-go) 와
 [SDK 가이드](https://sendgo.io/ko/sdk) 를 참고하세요.
 
+## 관리 API — 채널·템플릿·발신번호 등록 (v2 전용)
+
+주입받은 `SendgoClient` 에 관리 API 가 그대로 붙어 있습니다.
+콘솔에서만 되던 등록·심사를 컨트롤러나 `IHostedService` 에서 처리할 수 있습니다.
+
+> **sendgo.io 콘솔에 들어올 일이 없습니다.** 고객의 채널·발신번호·템플릿을
+> 여러분 화면만으로 끝까지 처리할 수 있습니다. 휴대폰 발신번호는 콘솔의 PASS
+> 본인인증 대신 **신분증 사본(`identityDocument`)을 받아 sendgo 운영자가 대신
+> 심사**합니다.
+>
+> 사람이 개입하는 지점은 **카카오 채널 인증번호 하나**뿐이고, 그마저도
+> 여러분 화면에서 입력받으면 됩니다 — 카카오가 관리자 휴대폰으로 직접 보내는
+> 확인이라 없앨 수 없습니다.
+>
+> 심사가 붙는 것들은 **비동기**입니다. 등록 호출이 성공했다는 건 "접수됐다"는
+> 뜻이지 "쓸 수 있다"는 뜻이 아닙니다 — 웹훅을 구독해 결과를 받으세요.
+
+```csharp
+[ApiController]
+[Route("onboarding")]
+public class OnboardingController(SendgoClient sendgo) : ControllerBase
+{
+    /// 1단계 — 카카오가 관리자 휴대폰으로 인증번호를 SMS 발송한다.
+    [HttpPost("channel/code")]
+    public Task<Dictionary<string, object?>> RequestCode(string yellowId, string phone) =>
+        sendgo.RequestKakaoChannelCodeAsync(yellowId, phone);
+
+    /// 2단계 — 사용자가 입력한 인증번호로 발신프로필 생성.
+    [HttpPost("channel")]
+    public Task<Dictionary<string, object?>> CreateChannel(KakaoSenderCreateRequest request) =>
+        sendgo.CreateKakaoSenderAsync(request);
+
+    /// 발신번호 등록 신청 — 서류를 그대로 넘긴다.
+    [HttpPost("senders")]
+    public async Task<Dictionary<string, object?>> RegisterSender(
+        [FromForm] string alias, [FromForm] string phone, IFormFile csu)
+    {
+        using var stream = new MemoryStream();
+        await csu.CopyToAsync(stream);
+
+        return await sendgo.RegisterSenderAsync(
+            new SenderRegistrationRequest
+            {
+                SenderAlias = alias,
+                SenderNumberType = "team_main",
+                PhoneE164 = phone,
+            },
+            [new MultipartFile
+            {
+                FieldName = "csuCertificate",
+                FileName = csu.FileName,
+                ContentType = csu.ContentType,
+                Content = stream.ToArray(),
+            }]);
+    }
+}
+```
+
+`SendgoClient` 에는 이것들도 함께 붙어 있습니다.
+
+| 메서드 | 하는 일 |
+| --- | --- |
+| `UploadKakaoImageAsync` · `UploadKakaoImagesAsync` | 카카오 이미지 업로드 — 브랜드메시지 템플릿용 URL 발급 |
+| `GetRejectedNumbersAsync` | 수신거부(080) 번호 조회 |
+| `SubscribeWebhookAsync` · `GetWebhookAsync` · `TestWebhookAsync` | 이벤트 웹훅 구독 |
+| `SendgoClient.VerifyWebhookSignature` | 수신한 웹훅 서명 검증 (정적 메서드) |
+
+웹훅을 구독하면 폴링이 필요 없습니다.
+
+```csharp
+app.MapPost("/hooks/sendgo", async (HttpRequest request) =>
+{
+    using var buffer = new MemoryStream();
+    await request.Body.CopyToAsync(buffer);
+    var raw = buffer.ToArray();
+
+    // 파싱한 객체가 아니라 받은 바이트 그대로 검증한다.
+    if (!SendgoClient.VerifyWebhookSignature(raw, request.Headers["X-Sendgo-Signature"], secret))
+        return Results.Unauthorized();
+
+    await queue.EnqueueAsync(raw);   // 처리는 큐로
+
+    return Results.NoContent();
+});
+```
+
+검수 결과는 비동기입니다. `BackgroundService` 로 폴링하세요 — 요청 핸들러
+안에서 기다리면 안 됩니다.
+
+```csharp
+public class TemplateInspectionPoller(SendgoClient sendgo, ILogger<TemplateInspectionPoller> log)
+    : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            foreach (var code in await PendingTemplateCodesAsync(ct))
+            {
+                var synced = await sendgo.SyncNoticeTemplateAsync(code, ct);
+                // data.template.inspectionStatus 가 APR 이 되면 발송 가능
+                log.LogInformation("템플릿 {Code} 검수 상태 확인", code);
+            }
+
+            await Task.Delay(TimeSpan.FromMinutes(30), ct);
+        }
+    }
+
+    private Task<IReadOnlyList<string>> PendingTemplateCodesAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<string>>([]);  // 앱의 저장소에서 읽어 온다
+}
+```
+
+전체 파라미터는 [Sendgo.SDK README](https://github.com/send-go/dotnet) 를 참고하세요.
+
+---
+
 ## 변경 사항
+
+### 1.3.0 (2026-09-11)
+
+- **관리 API 노출** — 코어 1.3.0 의 채널 등록, 알림톡 템플릿 검수 요청,
+  브랜드메시지 템플릿, 발신번호 심사 접수, 문자 상용구 템플릿을 주입받은
+  `SendgoClient` 에서 그대로 쓸 수 있습니다. `IFormFile` 을 `MultipartFile` 로
+  옮겨 서류를 그대로 올릴 수 있습니다.
+- `Sendgo.SDK` 의존성을 `1.3.0` 으로 올렸습니다.
+- **이벤트 웹훅** 추가 — 발신번호 승인, 알림톡 검수 결과, 채널 차단,
+  브랜드메시지 타겟팅 결과를 구독해 받습니다. 서명은 받은 원본 바이트로
+  검증합니다(SDK 에 검증 헬퍼 포함).
+- **카카오 이미지 업로드** 추가 — 브랜드메시지 템플릿의 `imageUrl` 은 카카오가
+  호스팅하는 URL 이어야 하는데, 그 URL 을 얻는 길이 콘솔에만 있었습니다.
+- **수신거부(080) 조회** 추가 — 자기 DB 의 수신 상태를 맞출 수 있습니다.
 
 ### 1.2.1 (2026-08-14)
 
