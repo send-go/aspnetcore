@@ -24,6 +24,15 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// </example>
 public static class SendgoServiceCollectionExtensions
 {
+    /// <summary>발송용 키 없이 계정 API 클라이언트를 등록합니다.</summary>
+    public static IServiceCollection AddSendgoAccount(this IServiceCollection services, string agentToken, string baseUrl = "https://sendgo.io")
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (string.IsNullOrWhiteSpace(agentToken)) throw new ArgumentException("agentToken은 필수입니다.", nameof(agentToken));
+        services.AddSingleton(_ => new AccountClient(agentToken, baseUrl));
+        return services;
+    }
+
     /// <summary>
     /// 람다로 <see cref="SendgoOptions"/>를 설정하고 <see cref="SendgoClient"/>를 싱글턴으로 등록합니다.
     /// </summary>
